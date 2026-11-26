@@ -11,7 +11,7 @@ export interface RefreshTokenPayload {
 const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 
-const ACCESS_EXPIRES_IN: SignOptions["expiresIn"] = "15m";
+const ACCESS_EXPIRES_IN: SignOptions["expiresIn"] = "1h";
 const REFRESH_EXPIRES_IN: SignOptions["expiresIn"] = "7d";
 
 function getAccessSecret(): string {
