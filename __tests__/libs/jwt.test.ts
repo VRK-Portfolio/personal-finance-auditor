@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const accessSecret = "unit-test-access-key";
 const refreshSecret = "unit-test-refresh-key";
+const userId = "507f1f77bcf86cd799439011";
 let helpers: typeof import("@/libs/jwt");
 
 beforeEach(async () => {
@@ -20,25 +21,31 @@ afterEach(() => {
 });
 
 describe("access tokens", () => {
-    it("normalizes the email and verifies a signed access token", () => {
-        const token = helpers.signAccessToken({ email: "  TEST@EXAMPLE.COM  " });
+    it("signs the user ID as the access token subject and verifies it", () => {
+        const token = helpers.signAccessToken({ _id: userId });
         const decoded = jwt.verify(token, accessSecret);
 
         expect(decoded).toMatchObject({
-            email: "test@example.com",
-            sub: "test@example.com",
+            _id: userId,
+            sub: userId,
             tokenType: "access",
         });
-        expect(helpers.verifyAccessToken(token)).toEqual({ email: "test@example.com" });
+        expect(helpers.verifyAccessToken(token)).toEqual({ _id: userId });
+    });
+
+    it("normalizes the user ID when verifying claims", () => {
+        const token = jwt.sign({ _id: ` ${userId.toUpperCase()} `, tokenType: "access" }, accessSecret);
+
+        expect(helpers.verifyAccessToken(token)).toEqual({ _id: userId });
     });
 
     it("expires access tokens after fifteen minutes", () => {
         vi.useFakeTimers();
         vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-        const token = helpers.signAccessToken({ email: "test@example.com" });
+        const token = helpers.signAccessToken({ _id: userId });
 
         vi.setSystemTime(new Date("2026-01-01T00:14:59Z"));
-        expect(helpers.verifyAccessToken(token)).toEqual({ email: "test@example.com" });
+        expect(helpers.verifyAccessToken(token)).toEqual({ _id: userId });
         vi.setSystemTime(new Date("2026-01-01T00:15:00Z"));
         expect(helpers.verifyAccessToken(token)).toBeNull();
     });
@@ -46,15 +53,15 @@ describe("access tokens", () => {
     it("rejects malformed tokens and tokens signed with another secret", () => {
         expect(helpers.verifyAccessToken("not-a-jwt")).toBeNull();
         expect(helpers.verifyAccessToken(jwt.sign({
-            email: "test@example.com", tokenType: "access",
+            _id: userId, tokenType: "access",
         }, "different-test-key"))).toBeNull();
     });
 
     it.each([
-        { email: "test@example.com", tokenType: "refresh" },
+        { _id: userId, tokenType: "refresh" },
         { tokenType: "access" },
-        { email: "", tokenType: "access" },
-        { email: 123, tokenType: "access" },
+        { _id: "", tokenType: "access" },
+        { _id: 123, tokenType: "access" },
     ])("rejects access tokens with invalid claims: %j", (payload) => {
         expect(helpers.verifyAccessToken(jwt.sign(payload, accessSecret))).toBeNull();
     });
@@ -64,12 +71,12 @@ describe("access tokens", () => {
     });
 
     it("throws when signing without an access secret and rejects verification", async () => {
-        const token = helpers.signAccessToken({ email: "test@example.com" });
+        const token = helpers.signAccessToken({ _id: userId });
         vi.stubEnv("JWT_ACCESS_SECRET", "");
         vi.resetModules();
         const withoutSecret = await import("@/libs/jwt");
 
-        expect(() => withoutSecret.signAccessToken({ email: "test@example.com" }))
+        expect(() => withoutSecret.signAccessToken({ _id: userId }))
             .toThrow("Missing JWT_ACCESS_SECRET environment variable");
         expect(withoutSecret.verifyAccessToken(token)).toBeNull();
     });

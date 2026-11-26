@@ -28,26 +28,41 @@ context, input validation, password and JWT helpers, database connections, and
 Mongoose document validation. No running Next.js server or MongoDB instance is
 required; database operations are mocked.
 
+Income API schemas normalize IDs to strings. The income database model uses a
+separate document type so `userId` remains a MongoDB ObjectId for references.
+
 ```bash
 # Run the complete backend suite once
 npm test -- --run __tests__
 
 # Run only auth resolver tests
 npm test -- --run __tests__/graphql/auth.resolvers.test.ts
+
+# Generate backend-only coverage with the existing 80% thresholds
+npm run test:coverage:backend
 ```
+
+The backend coverage command includes all GraphQL modules, shared libraries,
+models, validation schemas, and the GraphQL HTTP route. It writes the HTML report
+to [`coverage/backend/index.html`](./coverage/backend/index.html) and JSON coverage
+to [`coverage/backend/coverage-final.json`](./coverage/backend/coverage-final.json).
+The existing `test:coverage` command still measures the entire application,
+including frontend code.
+
+Tests cover authenticated MongoDB income CRUD, date filtering, ID normalization,
+missing/null date handling, authorization failures, and database/validation errors.
+HTTP tests exercise income and auth mutations together to catch resolver-map
+overwrites.
 
 The tests preserve current behavior rather than changing production code.
 Known backend limitations remain:
 
-- The combined resolver map overwrites income mutations with auth mutations.
-  Income mutation tests therefore use the standalone income module; HTTP tests
-  cover auth mutations and the income query.
-- Income update and deletion currently operate on in-memory data, not MongoDB,
-  and return records instead of the declared GraphQL result type.
 - Refresh token verification requires `tokenVersion`, but the refresh token
   signer does not include it.
 - Partial income updates currently apply the schema's default date when no
   date is supplied.
+- Income date filtering currently includes midnight at the start of the day
+  after `endDate`.
 
 ## Learn More
 

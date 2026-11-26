@@ -9,12 +9,12 @@ import {
 } from "@/schema/income.schema";
 
 const id = "507f1f77bcf86cd799439011";
-const input = { amount: 2500, source: "Salary", date: new Date("2026-01-01T00:00:00Z") };
+const input = { amount: 2500, source: "Salary", date: new Date("2026-01-01T00:00:00Z"), userId: id };
 
 describe("income input validation", () => {
     it("accepts valid creation input and supplies a date when omitted", () => {
         expect(createIncomeInputSchema.parse(input)).toEqual(input);
-        expect(createIncomeInputSchema.parse({ amount: 100, source: "Other" }).date)
+        expect(createIncomeInputSchema.parse({ amount: 100, source: "Other", userId: id }).date)
             .toBeInstanceOf(Date);
     });
 
@@ -22,6 +22,9 @@ describe("income input validation", () => {
         { ...input, amount: 0 },
         { ...input, source: "" },
         { ...input, date: "2026-01-01" },
+        { ...input, date: null },
+        { ...input, userId: "invalid" },
+        { ...input, userId: undefined },
         { source: input.source, date: input.date },
     ])("rejects invalid creation input: %j", (value) => {
         expect(createIncomeInputSchema.safeParse(value).success).toBe(false);

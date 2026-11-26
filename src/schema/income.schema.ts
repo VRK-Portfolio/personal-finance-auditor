@@ -1,10 +1,12 @@
 import { z } from "zod";
-import { positiveAmountSchema, idSchema } from "./common";
+import { idSchema, positiveAmountSchema } from "./common";
+import { Types } from "mongoose";
 
 export const createIncomeInputSchema = z.object({
   source: z.string().min(1),
   amount: positiveAmountSchema.nonoptional("Amount is required"),
-  date: z.date().default(new Date())
+  date: z.date().optional().default(new Date()),
+  userId: idSchema
 });
 
 export const updateIncomeInputSchema = createIncomeInputSchema.partial().extend({
