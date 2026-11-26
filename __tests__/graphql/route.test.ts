@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import { Types } from "mongoose";
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GET, POST } from "@/app/api/graphql/route";
@@ -10,6 +11,8 @@ const mocks = vi.hoisted(() => ({
     createUser: vi.fn(),
     findIncome: vi.fn(),
     createIncome: vi.fn(),
+    deleteIncome: vi.fn(),
+    updateIncome: vi.fn(),
     hashPassword: vi.fn(),
     verifyPassword: vi.fn(),
     signAccessToken: vi.fn(),
@@ -21,7 +24,12 @@ vi.mock("@/models/users.model", () => ({
     UserModel: { findOne: mocks.findUser, create: mocks.createUser },
 }));
 vi.mock("@/models/income.model", () => ({
-    IncomeModel: { find: mocks.findIncome, create: mocks.createIncome },
+    IncomeModel: {
+        find: mocks.findIncome,
+        create: mocks.createIncome,
+        findByIdAndDelete: mocks.deleteIncome,
+        findByIdAndUpdate: mocks.updateIncome,
+    },
 }));
 vi.mock("@/libs/password", () => ({
     hashPassword: mocks.hashPassword,
@@ -38,6 +46,28 @@ const loginQuery = `
     }
 `;
 const credentials = { email: "test@example.com", password: "Secure123!" };
+const userId = "507f1f77bcf86cd799439011";
+const incomeId = "507f1f77bcf86cd799439012";
+const storedUser = {
+    _id: new Types.ObjectId(userId),
+    email: credentials.email,
+    password: "hashed-password",
+};
+const incomeDocument = {
+    _id: new Types.ObjectId(incomeId),
+    toObject: () => ({
+        _id: new Types.ObjectId(incomeId),
+        userId: new Types.ObjectId(userId),
+        amount: 100,
+        source: "Salary",
+        date: new Date("2026-01-01T00:00:00Z"),
+    }),
+};
+const incomeMutations = [
+    ["addIncome", 'mutation { addIncome(amount: 100, source: "Salary") { success message errors { field message } } }'],
+    ["updateIncome", `mutation { updateIncome(_id: "${incomeId}", amount: 200) { success message errors { field message } } }`],
+    ["deleteIncome", `mutation { deleteIncome(_id: "${incomeId}") { success message errors { field message } } }`],
+] as const;
 
 function postRequest(query: string, variables: Record<string, string> = {}, authHeader?: string) {
     return new NextRequest("http://localhost/api/graphql", {
@@ -53,20 +83,23 @@ function postRequest(query: string, variables: Record<string, string> = {}, auth
 beforeEach(() => {
     vi.resetAllMocks();
     mocks.connectDB.mockResolvedValue(undefined);
-    mocks.findUser.mockResolvedValue({ email: credentials.email, password: "hashed-password" });
-    mocks.createUser.mockResolvedValue({ email: credentials.email });
+    mocks.findUser.mockResolvedValue(storedUser);
+    mocks.createUser.mockResolvedValue(storedUser);
     mocks.findIncome.mockResolvedValue([]);
+    mocks.createIncome.mockResolvedValue(incomeDocument);
+    mocks.deleteIncome.mockResolvedValue(incomeDocument);
+    mocks.updateIncome.mockResolvedValue(incomeDocument);
     mocks.verifyPassword.mockResolvedValue(true);
     mocks.hashPassword.mockResolvedValue("hashed-password");
     mocks.signAccessToken.mockReturnValue("test-access-token");
-    mocks.verifyAccessToken.mockReturnValue(null);
+    mocks.verifyAccessToken.mockReturnValue({ _id: userId });
 });
 
 describe("GraphQL HTTP route", () => {
     it("serves the income query through GET with the combined schema", async () => {
         const params = new URLSearchParams({ query: "{ income { success response { _id } } }" });
         const request = new NextRequest(`http://localhost/api/graphql?${params}`, {
-            headers: { "apollo-require-preflight": "true" },
+            headers: { "apollo-require-preflight": "true", authorization: "valid-token" },
         });
 
         const response = await GET(request);
@@ -77,6 +110,7 @@ describe("GraphQL HTTP route", () => {
         });
         expect(mocks.connectDB).toHaveBeenCalledOnce();
         expect(mocks.findIncome).toHaveBeenCalledOnce();
+        expect(mocks.findIncome).toHaveBeenCalledWith({ userId });
     });
 
     it("serves login through POST", async () => {
@@ -118,7 +152,7 @@ describe("GraphQL HTTP route", () => {
     });
 
     it("passes the authorization header from HTTP to the auth resolver", async () => {
-        mocks.verifyAccessToken.mockReturnValue({ email: credentials.email });
+        mocks.verifyAccessToken.mockReturnValue({ _id: userId });
 
         const response = await POST(postRequest(loginQuery, credentials, "valid-token"));
 
@@ -133,6 +167,50 @@ describe("GraphQL HTTP route", () => {
         });
         expect(mocks.verifyAccessToken).toHaveBeenCalledWith("valid-token");
         expect(mocks.findUser).not.toHaveBeenCalled();
+    });
+
+    it.each(incomeMutations)("serves %s through the combined mutation resolver map", async (operation, query) => {
+        const response = await POST(postRequest(query, {}, "valid-token"));
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+            data: {
+                [operation]: {
+                    success: true,
+                    message: operation === "addIncome"
+                        ? "Income added successfully"
+                        : operation === "updateIncome"
+                            ? "Income updated successfully"
+                            : "Income deleted successfully",
+                    errors: null,
+                },
+            },
+        });
+        expect(mocks.verifyAccessToken).toHaveBeenCalledWith("valid-token");
+        const databaseMethods = {
+            addIncome: mocks.createIncome,
+            updateIncome: mocks.updateIncome,
+            deleteIncome: mocks.deleteIncome,
+        };
+        expect(databaseMethods[operation]).toHaveBeenCalledOnce();
+    });
+
+    it.each(incomeMutations)("rejects unauthenticated HTTP requests for %s", async (operation, query) => {
+        const response = await POST(postRequest(query));
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+            data: {
+                [operation]: {
+                    success: false,
+                    message: "Unauthorized",
+                    errors: [{ field: "authHeader", message: "Authorization header is missing" }],
+                },
+            },
+        });
+        expect(mocks.createIncome).not.toHaveBeenCalled();
+        expect(mocks.updateIncome).not.toHaveBeenCalled();
+        expect(mocks.deleteIncome).not.toHaveBeenCalled();
     });
 
     it("returns GraphQL errors for invalid operations without database queries", async () => {

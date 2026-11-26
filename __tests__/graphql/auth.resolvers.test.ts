@@ -34,7 +34,12 @@ type Operation = "login" | "signUp";
 
 const credentials = { email: "test@example.com", password: "Secure123!" };
 const signUpInput = { ...credentials, confirmPassword: credentials.password };
-const storedUser = { email: credentials.email, password: "hashed-password" };
+const userId = "507f1f77bcf86cd799439011";
+const storedUser = {
+    _id: { toHexString: () => userId },
+    email: credentials.email,
+    password: "hashed-password",
+};
 
 const mutations = {
     login: `
@@ -121,7 +126,7 @@ describe.each(["login", "signUp"] as const)("authResolvers.%s", (operation) => {
     });
 
     it("rejects an already authenticated user before accessing the database", async () => {
-        mocks.verifyAccessToken.mockReturnValue({ email: credentials.email });
+        mocks.verifyAccessToken.mockReturnValue({ _id: userId });
 
         const result = await execute(operation, input, "valid-token");
 
@@ -149,18 +154,37 @@ describe.each(["login", "signUp"] as const)("authResolvers.%s", (operation) => {
         expect(mocks.findOne).toHaveBeenCalledWith({ email: credentials.email });
     });
 
-    it("returns a failure response when the database lookup throws", async () => {
-        mocks.findOne.mockRejectedValue(new Error("Database unavailable"));
+    it.each([
+        [new Error("Database unavailable"), "Database unavailable"],
+        ["unexpected rejection", "Unknown error"],
+    ])("returns a failure response when the database lookup throws", async (error, message) => {
+        mocks.findOne.mockRejectedValue(error);
 
         const result = await execute(operation);
 
         expect(result).toEqual({
             success: false,
             message: operation === "login" ? "Failed to fetch user" : "Failed to sign up user",
-            errors: [{ field: "unknown", message: "Database unavailable" }],
+            errors: [{ field: "unknown", message }],
             authToken: null,
         });
         expect(mocks.signAccessToken).not.toHaveBeenCalled();
+    });
+
+    it("returns a failure when access token signing throws", async () => {
+        if (operation === "login") {
+            mocks.findOne.mockResolvedValue(storedUser);
+        }
+        mocks.signAccessToken.mockImplementation(() => {
+            throw new Error("Signing failed");
+        });
+
+        expect(await execute(operation)).toEqual({
+            success: false,
+            message: operation === "login" ? "Failed to fetch user" : "Failed to sign up user",
+            errors: [{ field: "unknown", message: "Signing failed" }],
+            authToken: null,
+        });
     });
 
     it("rejects a missing required GraphQL variable without calling the resolver", async () => {
@@ -198,7 +222,7 @@ describe("authResolvers.login", () => {
         });
         expect(mocks.findOne).toHaveBeenCalledWith({ email: credentials.email });
         expect(mocks.verifyPassword).toHaveBeenCalledWith(credentials.password, storedUser.password);
-        expect(mocks.signAccessToken).toHaveBeenCalledWith(storedUser);
+        expect(mocks.signAccessToken).toHaveBeenCalledWith({ _id: userId });
         expect(mocks.verifyAccessToken).not.toHaveBeenCalled();
     });
 
@@ -229,6 +253,18 @@ describe("authResolvers.login", () => {
         });
         expect(mocks.signAccessToken).not.toHaveBeenCalled();
     });
+
+    it("returns a failure when password verification throws", async () => {
+        mocks.findOne.mockResolvedValue(storedUser);
+        mocks.verifyPassword.mockRejectedValue(new Error("Password verification failed"));
+
+        expect(await execute("login")).toMatchObject({
+            success: false,
+            authToken: null,
+            errors: [{ field: "unknown", message: "Password verification failed" }],
+        });
+        expect(mocks.signAccessToken).not.toHaveBeenCalled();
+    });
 });
 
 describe("authResolvers.signUp", () => {
@@ -247,7 +283,7 @@ describe("authResolvers.signUp", () => {
             ...signUpInput,
             password: storedUser.password,
         });
-        expect(mocks.signAccessToken).toHaveBeenCalledWith({ email: credentials.email });
+        expect(mocks.signAccessToken).toHaveBeenCalledWith({ _id: userId });
     });
 
     it("rejects mismatched password confirmation before creating a user", async () => {
@@ -293,6 +329,30 @@ describe("authResolvers.signUp", () => {
             errors: [{ field: "unknown", message: "User creation failed" }],
             authToken: null,
         });
+        expect(mocks.signAccessToken).not.toHaveBeenCalled();
+    });
+
+    it("returns a failure when user creation produces no document", async () => {
+        mocks.create.mockResolvedValue(null);
+
+        expect(await execute("signUp")).toEqual({
+            success: false,
+            message: "Failed to create user",
+            errors: [{ field: "unknown", message: "User creation failed" }],
+            authToken: null,
+        });
+        expect(mocks.signAccessToken).not.toHaveBeenCalled();
+    });
+
+    it("does not create a user when password hashing throws", async () => {
+        mocks.hashPassword.mockRejectedValue(new Error("Password hashing failed"));
+
+        expect(await execute("signUp")).toMatchObject({
+            success: false,
+            authToken: null,
+            errors: [{ field: "unknown", message: "Password hashing failed" }],
+        });
+        expect(mocks.create).not.toHaveBeenCalled();
         expect(mocks.signAccessToken).not.toHaveBeenCalled();
     });
 });

@@ -5,20 +5,26 @@ export const incomeTypeDefs = `
         source: String!
         date: String!
     }
+
+    type FieldError {
+        field: String!
+        message: String!
+    }
+
     type IncomeResult {
         success: Boolean!
         message: String
-        errorMessage: String
+        errors: [FieldError!]
     }
 
     type IncomeListResult {
         response: [Income!]
         success: Boolean!
         message: String
-        errorMessage: String
+        errors: String
     }
     type Query {
-        income: IncomeListResult!
+        income(startDate: String, endDate: String): IncomeListResult!
     }
 
     type Mutation {

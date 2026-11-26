@@ -65,7 +65,7 @@ export const authResolvers = {
 
                     } else {
                         // If the password is valid, generate an auth token and return success
-                        const authToken = signAccessToken(login);
+                        const authToken = signAccessToken({ _id: login._id.toHexString() });
                         return {
                             success: true,
                             message: "Login successful",
@@ -136,7 +136,7 @@ export const authResolvers = {
                     }
                 }
                 // Sign the access token for the newly created user
-                const token = signAccessToken({ email: _args.email });
+                const token = signAccessToken({ _id: user._id.toHexString() });
                 return {
                     success: true,
                     authToken: token,
