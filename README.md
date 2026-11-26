@@ -20,6 +20,35 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Backend Tests
+
+Backend tests are centralized in [`__tests__/`](./__tests__/) and run in the Node
+environment. They cover auth and income resolvers, GraphQL HTTP requests and
+context, input validation, password and JWT helpers, database connections, and
+Mongoose document validation. No running Next.js server or MongoDB instance is
+required; database operations are mocked.
+
+```bash
+# Run the complete backend suite once
+npm test -- --run __tests__
+
+# Run only auth resolver tests
+npm test -- --run __tests__/graphql/auth.resolvers.test.ts
+```
+
+The tests preserve current behavior rather than changing production code.
+Known backend limitations remain:
+
+- The combined resolver map overwrites income mutations with auth mutations.
+  Income mutation tests therefore use the standalone income module; HTTP tests
+  cover auth mutations and the income query.
+- Income update and deletion currently operate on in-memory data, not MongoDB,
+  and return records instead of the declared GraphQL result type.
+- Refresh token verification requires `tokenVersion`, but the refresh token
+  signer does not include it.
+- Partial income updates currently apply the schema's default date when no
+  date is supplied.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
