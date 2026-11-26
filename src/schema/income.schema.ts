@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { idSchema, positiveAmountSchema } from "./common";
-import { Types } from "mongoose";
 
 export const createIncomeInputSchema = z.object({
   source: z.string().min(1),

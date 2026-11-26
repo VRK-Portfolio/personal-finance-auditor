@@ -3,12 +3,60 @@ import { mapFieldErrors } from "@/libs/field-error";
 import { verifyUser } from "@/libs/verfiy-user";
 import { IncomeModel } from "@/models/income.model";
 import { ApiPostResponse, ApiResponse } from "@/schema/ApiResponse";
-import { FieldError } from "@/schema/common";
+import { FieldError, idSchema } from "@/schema/common";
 import {  CreateIncomeType, getIncomeSchema, GetIncomeType } from "@/schema/income.schema";
 import { z } from "zod";
 
 export const incomeResolvers = {
     Query: {
+        incomeById: async (_parent: unknown, args: { _id: string }, ctx: GraphQLContext) => {
+            try {
+                const user = verifyUser(ctx.authHeader);
+                if (!user.success || !user._id) {
+                    return {
+                        success: false,
+                        message: "Unauthorized",
+                        response: null,
+                        errors: user.errors ?? [{ field: "authHeader", message: "User ID is missing" }]
+                    };
+                }
+                const parsedId = idSchema.safeParse(args._id);
+                if (!parsedId.success) {
+                    return {
+                        success: false,
+                        message: "Invalid income ID",
+                        response: null,
+                        errors: [{ field: "_id", message: "Invalid MongoDB ObjectId" }]
+                    };
+                }
+                const income = await IncomeModel.findOne({ _id: parsedId.data, userId: user._id });
+                if (!income) {
+                    return {
+                        success: false,
+                        message: "Income not found",
+                        response: null,
+                        errors: [{ field: "_id", message: "Income not found" }]
+                    };
+                }
+                return {
+                    success: true,
+                    message: "Income fetched successfully",
+                    response: {
+                        ...income.toObject(),
+                        _id: income._id.toHexString(),
+                        date: income.date.toISOString()
+                    },
+                    errors: null
+                };
+            } catch (error: unknown) {
+                return {
+                    success: false,
+                    message: "Failed to fetch income",
+                    response: null,
+                    errors: [{ field: "unknown", message: error instanceof Error ? error.message : "Something went wrong" }]
+                };
+            }
+        },
         income: async (_parent: unknown, _args: { startDate: string, endDate: string }, ctx: GraphQLContext): Promise<ApiResponse<GetIncomeType | null>> => {
             try {
                 const verifyToken = verifyUser(ctx.authHeader);
@@ -64,7 +112,7 @@ export const incomeResolvers = {
         }
     },
     Mutation: {
-        addIncome: async (_parent: unknown, args: CreateIncomeType, ctx: GraphQLContext): Promise<ApiPostResponse> => {
+        addIncome: async (_parent: unknown, args: {input: CreateIncomeType}, ctx: GraphQLContext): Promise<ApiPostResponse> => {
             try {
                 // Check if the authorization header is present in the request context
                 const verifyToken = verifyUser(ctx.authHeader);
@@ -77,10 +125,11 @@ export const incomeResolvers = {
                 }
 
                 const userId = verifyToken._id;
+                const { input } = args;
                 // Create a new income record in the database
                 const addIncome = await IncomeModel.create({
-                    ...args,
-                    date: args.date ?? undefined,
+                    ...input,
+                    date: input.date ?? undefined,
                     userId: userId
                 });
                 const parsedIncome = getIncomeSchema.safeParse({
