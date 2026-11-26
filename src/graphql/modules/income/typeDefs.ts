@@ -6,11 +6,6 @@ export const incomeTypeDefs = `
         date: String!
     }
 
-    type FieldError {
-        field: String!
-        message: String!
-    }
-
     type IncomeResult {
         success: Boolean!
         message: String
@@ -23,13 +18,25 @@ export const incomeTypeDefs = `
         message: String
         errors: String
     }
+    type IncomeByIdResult {
+        response: Income
+        success: Boolean!
+        message: String
+        errors: [FieldError!]
+    }
     type Query {
         income(startDate: String, endDate: String): IncomeListResult!
+        incomeById(_id: ID!): IncomeByIdResult!
     }
 
-    type Mutation {
-        addIncome(amount: Float!, source: String!, date: String): IncomeResult!
-        deleteIncome(_id: ID!): IncomeResult!
-        updateIncome(_id: ID!, amount: Float, source: String, date: String): IncomeResult!
+    input IncomeInput {
+        amount: Float!
+        source: String!
+        date: String
     }
-`
+    type Mutation {
+        addIncome(input: IncomeInput!): IncomeResult!
+        deleteIncome(_id: ID!): IncomeResult!
+        updateIncome(_id: ID!, input: IncomeInput!): IncomeResult!
+    }
+`;

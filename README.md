@@ -22,6 +22,42 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 
 ## Backend Tests
 
+### Get a record by ID
+
+The GraphQL API provides `incomeById(_id: ID!)`, `expenseById(_id: ID!)`,
+and `categoryById(_id: ID!)`. Each returns `success`, `message`,
+`errors { field message }`, and a nullable single-record `response`.
+These queries require the current authorization token and only read records
+owned by that user. Missing records and another user's records both return
+a not-found response. Invalid IDs are rejected before database access.
+Dates in these responses are ISO strings.
+
+```graphql
+query GetRecords($incomeId: ID!, $expenseId: ID!, $categoryId: ID!) {
+  incomeById(_id: $incomeId) {
+    success
+    errors { field message }
+    response { _id amount source date }
+  }
+  expenseById(_id: $expenseId) {
+    success
+    errors { field message }
+    response { _id amount category merchant date }
+  }
+  categoryById(_id: $categoryId) {
+    success
+    errors { field message }
+    response { _id name userId }
+  }
+}
+```
+
+Run the by-ID query regression tests with:
+
+```bash
+npm test -- --run __tests__/graphql/by-id.queries.test.ts
+```
+
 Backend tests are centralized in [`__tests__/`](./__tests__/) and run in the Node
 environment. They cover auth and income resolvers, GraphQL HTTP requests and
 context, input validation, password and JWT helpers, database connections, and
