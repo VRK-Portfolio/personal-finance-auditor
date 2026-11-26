@@ -1,7 +1,7 @@
 import jwt, { type SignOptions } from "jsonwebtoken";
 
 export interface AccessTokenPayload {
-  email: string;
+  _id: string;
 }
 
 export interface RefreshTokenPayload {
@@ -29,9 +29,9 @@ function getRefreshSecret(): string {
 }
 
 export function signAccessToken(payload: AccessTokenPayload): string {
-  const normalizedEmail = payload.email.trim().toLowerCase();
+  const normalizedEmail = payload._id;
   return jwt.sign(
-    { ...payload, email: normalizedEmail, tokenType: "access" },
+    { ...payload, _id: normalizedEmail, tokenType: "access" },
     getAccessSecret(),
     { expiresIn: ACCESS_EXPIRES_IN, subject: normalizedEmail }
   );
@@ -52,14 +52,14 @@ export function verifyAccessToken(token: string): AccessTokenPayload | null {
     if (
       typeof decoded === "string" ||
       decoded.tokenType !== "access" ||
-      typeof decoded.email !== "string" ||
-      !decoded.email
+      typeof decoded._id !== "string" ||
+      !decoded._id
     ) {
       return null;
     }
 
     return {
-      email: decoded.email.trim().toLowerCase(),
+      _id: decoded._id.trim().toLowerCase(),
     };
   } catch {
     return null;

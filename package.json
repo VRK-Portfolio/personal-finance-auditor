@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:coverage:backend": "vitest run __tests__ --coverage --coverage.include=\"src/{graphql,libs,models,schema}/**/*.ts\" --coverage.include=\"src/app/api/graphql/route.ts\" --coverage.reportsDirectory=coverage/backend --coverage.reporter=text --coverage.reporter=json --coverage.reporter=html --coverage.thresholds.lines=80 --coverage.thresholds.functions=80 --coverage.thresholds.branches=80 --coverage.thresholds.statements=80"
   },
   "dependencies": {
     "@apollo/client": "^4.3.8",
