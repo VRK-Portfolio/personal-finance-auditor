@@ -13,3 +13,11 @@ export type ApiPostResponse = {
     message: string;
     errors: FieldError[] | null;
 };
+
+
+export type AuthResponse = {
+    success: boolean;
+    message: string;
+    errors: FieldError[] | null;
+    authToken?: string;
+}
