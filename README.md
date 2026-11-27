@@ -22,6 +22,119 @@ This project uses [`next/font`](https://nextjs.org/docs/app/building-your-applic
 
 ## Backend Tests
 
+### Savings
+
+The authenticated savings API provides `savings`, `savingsById(_id: ID!)`,
+`addSavings(amount: Float!, savingCategoryId: ID!, savingDate: String)`,
+`updateSavings(_id: ID!, amount: Float, savingCategoryId: ID, savingDate: String)`,
+and `deleteSavings(_id: ID!)`. All operations are scoped to the current user.
+Savings responses include `userId`. Creating savings assigns the user ID from
+the authorization token; `savings` lists only records with that user ID.
+Clients do not need to pass a user ID.
+Amounts must be at least 1, categories must belong to the current user, and saving dates
+accept ISO dates (`2026-01-01`) or ISO timestamps with a timezone
+(`2026-01-01T12:30:00Z`). Dates and timestamps in responses are ISO strings.
+For `addSavings`, a null or omitted saving date defaults to the current date
+and time for that request. Invalid date strings are still rejected.
+Updates require at least one field; omitted fields are preserved and explicit
+null values are rejected. Results return `success`, `message`,
+`errors { field message }`, and `response`.
+
+Saving categories have `name`, `userId`, and timestamps. Use `savingCategories`,
+`addSavingCategory(name: String!)`, `updateSavingCategory(_id: ID!, name: String!)`,
+and `deleteSavingCategory(_id: ID!)` to manage the authenticated user's categories.
+Names must be nonblank. Deletion is rejected while savings reference the category;
+reassign or delete those savings first.
+
+Create a category and use its returned `_id` as `savingCategoryId`:
+
+```graphql
+mutation {
+  addSavingCategory(name: "LIC") {
+    success
+    errors { field message }
+    response { _id userId name }
+  }
+}
+```
+
+```graphql
+mutation AddSavings($categoryId: ID!) {
+  addSavings(amount: 20000, savingCategoryId: $categoryId, savingDate: null) {
+    success
+    errors { field message }
+    response { _id userId savingCategoryId amount savingDate }
+  }
+}
+```
+
+**Breaking change:** `savingType` is replaced by the required `savingCategoryId`.
+Before using this API with existing data, manually create categories per user
+and assign a valid category ObjectId to each savings record's `savingCategoryId`.
+Update client mutations and response selections accordingly. Restart the
+development server after the model change so Mongoose registers the new schema.
+
+Run savings regression tests with:
+
+```bash
+npm test -- --run __tests__/graphql/savings.resolvers.test.ts __tests__/graphql/savingCategory.resolvers.test.ts
+```
+
+### Expenses and categories
+
+Expenses reference the existing `Category` model through `category`, stored as
+a MongoDB ObjectId and returned as a GraphQL ID string. Creating expenses
+requires `amount` (at least 1) and `category` (an existing category owned by the
+authenticated user). Validation happens before saving. Null or omitted create
+dates default to the current time; supplied dates accept ISO dates or timestamps
+with a timezone. Merchant and description are optional text, not IDs.
+
+All expense/category reads, updates, and deletes are restricted to the current
+user. Category names must be nonblank. Creating a duplicate name for the same
+user is rejected. Categories cannot be deleted while expenses reference them.
+Expense and category mutations return the record in `response`, including
+`_id` and `userId`. Dates in expense responses are ISO strings.
+
+```graphql
+mutation {
+  addCategory(name: "Movies") {
+    success
+    errors { field message }
+    response { _id userId name }
+  }
+}
+```
+
+```graphql
+mutation AddExpense($categoryId: ID!) {
+  addExpense(input: { amount: 25, category: $categoryId, merchant: "Cinema" }) {
+    success
+    errors { field message }
+    response { _id userId category amount date merchant }
+  }
+}
+```
+
+`addExpense` no longer requires a client-generated `_id`. `ExpenseInput`
+requires `amount` and `category`; partial updates use `UpdateExpenseInput`.
+Updates preserve omitted fields, require at least one field, and reject null
+amount/category/date. Optional merchant/description can be cleared with null.
+The existing `expenses(startDate, endDate)` filter applies when both dates are
+provided, includes the end day, and excludes the following midnight.
+
+**Existing data:** restart the development server after model changes. Convert
+existing string-valued expense categories to ObjectIds referencing categories
+owned by the same user before using category deletion protection. Invalid or
+unowned references need reassignment. No database migration is run automatically.
+Responses normalize both valid string category IDs and ObjectIds. If the old
+Mongoose model remains cached during hot reload, restart the server to ensure
+new expense categories are stored as ObjectIds.
+Update client mutation variable types for `UpdateExpenseInput`.
+
+```bash
+npm test -- --run __tests__/graphql/expense.resolvers.test.ts __tests__/graphql/category.resolvers.test.ts __tests__/graphql/by-id.queries.test.ts __tests__/models/models.test.ts
+```
+
 ### Get a record by ID
 
 The GraphQL API provides `incomeById(_id: ID!)`, `expenseById(_id: ID!)`,
