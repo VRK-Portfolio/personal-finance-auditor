@@ -35,7 +35,7 @@ const income = { ...baseDocument, amount: 100, source: "Salary", date };
 const expense = {
     ...baseDocument,
     amount: 25,
-    category: "507f1f77bcf86cd799439014",
+    category: new Types.ObjectId("507f1f77bcf86cd799439014"),
     merchant: "Cinema",
     description: "Movie ticket",
     date,
@@ -57,7 +57,7 @@ const cases = [
         document: expense,
         fields: "_id userId amount category date merchant description",
         expected: {
-            _id: id, userId, amount: 25, category: expense.category,
+            _id: id, userId, amount: 25, category: expense.category.toHexString(),
             date: date.toISOString(), merchant: "Cinema", description: "Movie ticket",
         },
     },

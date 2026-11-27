@@ -24,6 +24,7 @@ export const categoryTypeDefs = `
     }
 
     type CategoryResult {
+        response: Category
         success: Boolean!
         message: String
         errors: [FieldError!]
