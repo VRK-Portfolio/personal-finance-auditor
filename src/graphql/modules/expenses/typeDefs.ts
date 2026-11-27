@@ -3,7 +3,7 @@ export const expensesTypeDefs = `
         _id: ID!
         userId: ID!
         amount: Float!
-        category: String!
+        category: ID!
         date: String
         merchant: String
         description: String
@@ -26,12 +26,20 @@ export const expensesTypeDefs = `
     }
 
     type ExpenseResult {
+        response: Expense
         success: Boolean!
         message: String
         errors: [FieldError!]
     }
 
     input ExpenseInput {
+        amount: Float!
+        category: ID!
+        date: String
+        merchant: String
+        description: String
+    }
+    input UpdateExpenseInput {
         amount: Float
         category: ID
         date: String
@@ -39,8 +47,8 @@ export const expensesTypeDefs = `
         description: String
     }
     type Mutation {
-        addExpense(_id: ID!, input: ExpenseInput!): ExpenseResult!
+        addExpense(input: ExpenseInput!): ExpenseResult!
         deleteExpense(_id: ID!): ExpenseResult!
-        updateExpense(_id: ID!, input: ExpenseInput!): ExpenseResult!
+        updateExpense(_id: ID!, input: UpdateExpenseInput!): ExpenseResult!
     }
 `;

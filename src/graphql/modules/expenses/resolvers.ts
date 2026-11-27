@@ -1,10 +1,40 @@
-import { GraphQLContext } from "@/graphql/context"
-import { verifyUser } from "@/libs/verfiy-user"
-import { CreateExpenseType, ExpenseSchema } from "@/schema/expense.schema"
-import { ExpenseModel } from "@/models/expense.model"
-import { FieldError, idSchema } from "@/schema/common"
-import { mapFieldErrors } from "@/libs/field-error"
-import z from "zod"
+import type { GraphQLContext } from "@/graphql/context";
+import { mapFieldErrors } from "@/libs/field-error";
+import { verifyUser } from "@/libs/verfiy-user";
+import { CategoryModel } from "@/models/category.model";
+import { ExpenseModel } from "@/models/expense.model";
+import { FieldError, idSchema } from "@/schema/common";
+import { createExpenseInputSchema, updateExpenseInputSchema } from "@/schema/expense.schema";
+import { z } from "zod";
+
+type ExpenseInput = {
+    amount: number;
+    category: string;
+    date?: string | null;
+    merchant?: string | null;
+    description?: string | null;
+};
+
+type UpdateExpenseInput = Omit<Partial<ExpenseInput>, "amount" | "category"> & {
+    amount?: number | null;
+    category?: string | null;
+};
+
+function failure(message: string, errors: FieldError[]) {
+    return { success: false, message, response: null, errors };
+}
+
+function serializeExpense(expense: NonNullable<Awaited<ReturnType<typeof ExpenseModel.findOne>>>) {
+    return {
+        _id: expense._id.toHexString(),
+        userId: expense.userId.toHexString(),
+        amount: expense.amount,
+        category: idSchema.parse(expense.category),
+        date: expense.date?.toISOString() ?? null,
+        merchant: expense.merchant ?? null,
+        description: expense.description ?? null
+    };
+}
 
 export const expensesResolvers = {
     Query: {
@@ -12,276 +42,156 @@ export const expensesResolvers = {
             try {
                 const user = verifyUser(ctx.authHeader);
                 if (!user.success || !user._id) {
-                    return {
-                        success: false,
-                        message: "Unauthorized",
-                        response: null,
-                        errors: user.errors ?? [{ field: "authHeader", message: "User ID is missing" }]
-                    };
+                    return failure("Unauthorized", user.errors ?? [{ field: "authHeader", message: "User ID is missing" }]);
                 }
                 const parsedId = idSchema.safeParse(args._id);
                 if (!parsedId.success) {
-                    return {
-                        success: false,
-                        message: "Invalid expense ID",
-                        response: null,
-                        errors: [{ field: "_id", message: "Invalid MongoDB ObjectId" }]
-                    };
+                    return failure("Invalid expense ID", [{ field: "_id", message: "Invalid MongoDB ObjectId" }]);
                 }
                 const expense = await ExpenseModel.findOne({ _id: parsedId.data, userId: user._id });
                 if (!expense) {
-                    return {
-                        success: false,
-                        message: "Expense not found",
-                        response: null,
-                        errors: [{ field: "_id", message: "Expense not found" }]
-                    };
+                    return failure("Expense not found", [{ field: "_id", message: "Expense not found" }]);
                 }
                 return {
-                    success: true,
-                    message: "Expense fetched successfully",
-                    response: {
-                        ...expense.toObject(),
-                        _id: expense._id.toHexString(),
-                        userId: expense.userId.toHexString(),
-                        date: expense.date?.toISOString() ?? null
-                    },
-                    errors: null
+                    success: true, message: "Expense fetched successfully",
+                    response: serializeExpense(expense), errors: null
                 };
             } catch (error: unknown) {
-                return {
-                    success: false,
-                    message: "Failed to fetch expense",
-                    response: null,
-                    errors: [{ field: "unknown", message: error instanceof Error ? error.message : "Something went wrong" }]
-                };
+                return failure("Failed to fetch expense", [
+                    { field: "unknown", message: error instanceof Error ? error.message : "Something went wrong" }
+                ]);
             }
         },
-        expenses: async (_parent: unknown, _args: { startDate: string, endDate: string }, ctx: GraphQLContext) => {
+        expenses: async (_parent: unknown, args: { startDate?: string | null; endDate?: string | null }, ctx: GraphQLContext) => {
             try {
-                // Verify the user's authentication token before fetching expenses
-                const verifyToken = verifyUser(ctx.authHeader);
-                // If the token verification fails, return an error response
-                if (!verifyToken.success) {
-                    return {
-                        success: false,
-                        message: verifyToken.message,
-                        response: null,
-                        errors: verifyToken.errors
-                    }
+                const user = verifyUser(ctx.authHeader);
+                if (!user.success || !user._id) {
+                    return failure("Unauthorized", user.errors ?? [{ field: "authHeader", message: "User ID is missing" }]);
                 }
-
-                // Convert the start date to UTC and set the time to the beginning of the day
-                const start = new Date(_args?.startDate);
-                start.setUTCHours(0, 0, 0, 0);
-                // Convert the end date to UTC and set the time to the beginning of the day
-                const endExclusive = new Date(_args.endDate);
-                endExclusive.setUTCHours(0, 0, 0, 0);
-                endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
-                // Fetch all income records from the database
-                let expense: Awaited<ReturnType<typeof ExpenseModel.find>>;
-                // If no start or end date is provided, fetch all expenses for the user
-                if (!_args?.startDate || !_args?.endDate) {
-                    expense = await ExpenseModel.find({
-                        userId: verifyToken._id
-                    });
-                    return {
-                        success: true,
-                        message: "Expense fetched successfully",
-                        response: expense,
-                        errors: null
-                    }
+                let expenses: Awaited<ReturnType<typeof ExpenseModel.find>>;
+                if (!args.startDate || !args.endDate) {
+                    expenses = await ExpenseModel.find({ userId: user._id });
                 } else {
-                    // Fetch expenses within the specified date range for the authenticated user
-                    expense = await ExpenseModel.find({
-                        userId: verifyToken._id,
-                        date: {
-                            $gte: start,
-                            $lt: endExclusive
-                        }
+                    const dateSchema = z.union([z.iso.date(), z.iso.datetime({ offset: true })]);
+                    const range = z.object({ startDate: dateSchema, endDate: dateSchema }).safeParse(args);
+                    if (!range.success) {
+                        return failure("Invalid expense date range", mapFieldErrors(z.flattenError(range.error).fieldErrors));
+                    }
+                    const start = new Date(range.data.startDate);
+                    start.setUTCHours(0, 0, 0, 0);
+                    const endExclusive = new Date(range.data.endDate);
+                    endExclusive.setUTCHours(0, 0, 0, 0);
+                    endExclusive.setUTCDate(endExclusive.getUTCDate() + 1);
+                    if (start >= endExclusive) {
+                        return failure("Invalid expense date range", [
+                            { field: "endDate", message: "End date must not be before start date" }
+                        ]);
+                    }
+                    expenses = await ExpenseModel.find({
+                        userId: user._id, date: { $gte: start, $lt: endExclusive }
                     });
                 }
-                // Return the fetched expenses for the authenticated user
                 return {
-                    success: true,
-                    message: "Expenses fetched successfully",
-                    response: expense,
-                    errors: null
-                }
-            } catch (error: Error | unknown) {
-                // Catch any unexpected errors and return a generic error response
-                return {
-                    success: false,
-                    message: "Something went wrong",
-                    response: null,
-                    errors: [error instanceof Error ? error.message : String(error)]
-                }
+                    success: true, message: "Expenses fetched successfully",
+                    response: expenses.map(serializeExpense), errors: null
+                };
+            } catch (error: unknown) {
+                return failure("Failed to fetch expenses", [
+                    { field: "unknown", message: error instanceof Error ? error.message : "Something went wrong" }
+                ]);
             }
-
         }
     },
     Mutation: {
-        addExpense: async (_parent: unknown, args: { input: CreateExpenseType }, ctx: GraphQLContext) => {
-            // Add a new expense for the authenticated user
+        addExpense: async (_parent: unknown, args: { input: ExpenseInput }, ctx: GraphQLContext) => {
             try {
-                // Verify the user's authentication token
-                const verifyToken = verifyUser(ctx.authHeader);
-                // If the token verification fails, return an error response
-                if (!verifyToken.success) {
-                      return {
-                        success: false,
-                        message: verifyToken.message,
-                        response: null,
-                        errors: verifyToken.errors
-                    }
-                } else {
-                    // Extract the input data for the new expense
-                    const { input } = args;
-                    // Create a new expense record in the database
-                    const newExpense = await ExpenseModel.create({
-                        ...input,
-                        date: input.date ?? undefined,
-                        userId: verifyToken._id,
-                        category: input.category
-                    });
-                    // Parse and validate the newly created expense using the schema
-                    const parseExpense = ExpenseSchema.safeParse({
-                        ...newExpense.toObject(),
-                        _id: newExpense._id.toHexString()
-                    });
-
-                    // If parsing the expense fails, return an error response
-                    if(!parseExpense.success) {
-                        const {fieldErrors} = z.flattenError(parseExpense.error);
-                        const mappedErrors: FieldError[] = mapFieldErrors(fieldErrors);
-                        return {
-                            success: false,
-                            message: "Failed to parse expense",
-                            response: null,
-                            errors: mappedErrors
-                        }
-                    }
-
-                    // Return a successful response with the parsed expense data
-                    return {
-                        success: true,
-                        message: "Expense added successfully",
-                        response: parseExpense.data,
-                        errors: null
-                    }
+                const user = verifyUser(ctx.authHeader);
+                if (!user.success || !user._id) {
+                    return failure("Unauthorized", user.errors ?? [{ field: "authHeader", message: "User ID is missing" }]);
                 }
-            } catch (error) {
-                // Catch any unexpected errors and return a generic error response
+                const input = createExpenseInputSchema.safeParse({
+                    ...args.input, date: args.input.date ?? new Date().toISOString()
+                });
+                if (!input.success) {
+                    return failure("Invalid expense input", mapFieldErrors(z.flattenError(input.error).fieldErrors));
+                }
+                const category = await CategoryModel.findOne({ _id: input.data.category, userId: user._id });
+                if (!category) {
+                    return failure("Category not found", [{ field: "category", message: "Category not found" }]);
+                }
+                const expense = await ExpenseModel.create({ ...input.data, userId: user._id });
                 return {
-                    success: false,
-                    message: "Something went wrong",
-                    response: null,
-                    errors: [error instanceof Error ? error.message : String(error)]
+                    success: true, message: "Expense added successfully",
+                    response: serializeExpense(expense), errors: null
+                };
+            } catch (error: unknown) {
+                return failure("Failed to add expense", [
+                    { field: "unknown", message: error instanceof Error ? error.message : "Something went wrong" }
+                ]);
+            }
+        },
+        updateExpense: async (_parent: unknown, args: { _id: string; input: UpdateExpenseInput }, ctx: GraphQLContext) => {
+            try {
+                const user = verifyUser(ctx.authHeader);
+                if (!user.success || !user._id) {
+                    return failure("Unauthorized", user.errors ?? [{ field: "authHeader", message: "User ID is missing" }]);
                 }
+                const parsedId = idSchema.safeParse(args._id);
+                if (!parsedId.success) {
+                    return failure("Invalid expense ID", [{ field: "_id", message: "Invalid MongoDB ObjectId" }]);
+                }
+                const input = updateExpenseInputSchema.safeParse(args.input);
+                if (!input.success) {
+                    return failure("Invalid expense input", mapFieldErrors(z.flattenError(input.error).fieldErrors));
+                }
+                if (input.data.category !== undefined) {
+                    const category = await CategoryModel.findOne({ _id: input.data.category, userId: user._id });
+                    if (!category) {
+                        return failure("Category not found", [{ field: "category", message: "Category not found" }]);
+                    }
+                }
+                const changes = Object.fromEntries(Object.entries(input.data).filter(([, value]) => value !== undefined));
+                const expense = await ExpenseModel.findOneAndUpdate(
+                    { _id: parsedId.data, userId: user._id },
+                    { $set: changes },
+                    { new: true, runValidators: true }
+                );
+                if (!expense) {
+                    return failure("Expense not found", [{ field: "_id", message: "Expense not found" }]);
+                }
+                return {
+                    success: true, message: "Expense updated successfully",
+                    response: serializeExpense(expense), errors: null
+                };
+            } catch (error: unknown) {
+                return failure("Failed to update expense", [
+                    { field: "unknown", message: error instanceof Error ? error.message : "Something went wrong" }
+                ]);
             }
         },
         deleteExpense: async (_parent: unknown, args: { _id: string }, ctx: GraphQLContext) => {
-            // Verify the user before attempting to delete an expense
             try {
-                // Verify the user before attempting to delete an expense
-                const user = await verifyUser(ctx.authHeader);
-                // If the user verification fails, return an error response
-                if(!user.success) {
-                    return {
-                        success: false,
-                        message: user.message,
-                        response: null,
-                        errors: user.errors
-                    }
-                } else {
-                    // Proceed with deleting the expense if the user is verified
-                    if(!args._id) {
-                        return {
-                            success: false,
-                            message: "Expense ID is required",
-                            response: null,
-                            errors: [{ field: "Expense ID", message: "Expense ID is required" }]
-                        }
-                    } else {
-                        // Attempt to delete the expense from the database
-                        const deletedExpense = await ExpenseModel.findByIdAndDelete(args._id);
-                        // If the expense was not found, return an error response
-                        if(!deletedExpense) {
-                            return {
-                                success: false,
-                                message: "Expense not found",
-                                response: null,
-                                errors: [{ field: "Expense ID", message: "Expense not found" }]
-                            }
-                        }
-                        // Return a success response if the expense was deleted successfully
-                        return {
-                            success: true,
-                            message: "Expense deleted successfully",
-                            response: deletedExpense,
-                            errors: null
-                        }
-                    }
+                const user = verifyUser(ctx.authHeader);
+                if (!user.success || !user._id) {
+                    return failure("Unauthorized", user.errors ?? [{ field: "authHeader", message: "User ID is missing" }]);
                 }
-            } catch (error: Error | unknown) {
-                // Catch any unexpected errors and return a generic error response
+                const parsedId = idSchema.safeParse(args._id);
+                if (!parsedId.success) {
+                    return failure("Invalid expense ID", [{ field: "_id", message: "Invalid MongoDB ObjectId" }]);
+                }
+                const expense = await ExpenseModel.findOneAndDelete({ _id: parsedId.data, userId: user._id });
+                if (!expense) {
+                    return failure("Expense not found", [{ field: "_id", message: "Expense not found" }]);
+                }
                 return {
-                    success: false,
-                    message: "Something went wrong",
-                    response: null,
-                    errors: [error instanceof Error ? error.message : String(error)]
-                }
-            }
-        },
-        updateExpense: async (_parent: unknown, args: { _id: string, input: CreateExpenseType }, ctx: GraphQLContext) => {
-            try {
-                const user = await verifyUser(ctx.authHeader);
-                if(!user.success) {
-                    return {
-                        success: false,
-                        message: user.message,
-                        response: null,
-                        errors: user.errors
-                    }
-                } else {
-                    if(!args._id) {
-                        return {
-                            success: false,
-                            message: "Expense ID is required",
-                            response: null,
-                            errors: [{ field: "Expense ID", message: "Expense ID is required" }]
-                        }
-                    } else {
-                        const updatedExpense = await ExpenseModel.findByIdAndUpdate(
-                            args._id,
-                            { ...args.input },
-                            { new: true }
-                        );
-                        if(!updatedExpense) {
-                            return {
-                                success: false,
-                                message: "Expense not found",
-                                response: null,
-                                errors: [{ field: "Expense ID", message: "Expense not found" }]
-                            }
-                        }
-                        return {
-                            success: true,
-                            message: "Expense updated successfully",
-                            response: updatedExpense,
-                            errors: null
-                        }
-                    }
-                }
-
-            } catch(error: Error | unknown) {
-                return {
-                    success: false,
-                    message: "Something went wrong",
-                    response: null,
-                    errors: [error instanceof Error ? error.message : String(error)]
-                }
+                    success: true, message: "Expense deleted successfully",
+                    response: serializeExpense(expense), errors: null
+                };
+            } catch (error: unknown) {
+                return failure("Failed to delete expense", [
+                    { field: "unknown", message: error instanceof Error ? error.message : "Something went wrong" }
+                ]);
             }
         }
     }
-}
+};

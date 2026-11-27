@@ -1,13 +1,23 @@
 import z from "zod";
-import { idSchema } from "./common";
+import { idSchema, positiveAmountSchema } from "./common";
 
-export const ExpenseSchema = z.object({
-    amount: z.number().min(1, "Amount must be at least 1"),
-    description: z.string().optional(),
-    date: z.date().optional().default(new Date()),
-    userId: idSchema,
+export const createExpenseInputSchema = z.object({
+    amount: positiveAmountSchema,
     category: idSchema,
-    merchant: idSchema.optional()
+    date: z.union([z.iso.date(), z.iso.datetime({ offset: true })])
+        .transform(value => new Date(value)),
+    merchant: z.string().nullish(),
+    description: z.string().nullish()
+});
+
+export const updateExpenseInputSchema = createExpenseInputSchema.partial().refine(
+    input => Object.values(input).some(value => value !== undefined),
+    { message: "At least one expense field is required", path: ["input"] }
+);
+
+export const ExpenseSchema = createExpenseInputSchema.extend({
+    date: z.date().optional().default(() => new Date()),
+    userId: idSchema
 });
 
 export const updateExpenseSchema = ExpenseSchema.partial().extend({

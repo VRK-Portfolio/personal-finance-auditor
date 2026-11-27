@@ -1,8 +1,9 @@
 import z from "zod";
+import { idSchema } from "./common";
 
 export const categoryTypeSchema = z.object({
-    name: z.string().min(1, "Name is required"),
-    userId: z.string().min(1, "User ID is required")
+    name: z.string().trim().min(1, "Name is required"),
+    userId: idSchema
 });
 
 export type CategoryType = z.infer<typeof categoryTypeSchema>;
